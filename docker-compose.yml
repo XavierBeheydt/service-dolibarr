@@ -30,6 +30,7 @@ services:
         image: tuxgasy/dolibarr:${DOLI_TAG}
         env_file:
             - .env/dolibarr.env
+        restart: always
         ports:
             - "${DOLI_PORT}:80"
         links:
