@@ -2,19 +2,26 @@
 
 .DEFAULT_GOAL := up
 
-MKDIR	= mkdir
+# Variables
+MKDIR = mkdir
 ifeq ($(OS), Windows_NT)
 	WEB_BROWSER = powershell -Command Start-Process
 else
 	WEB_BROWSER = open
 endif
 COMPOSE_CMD = docker compose \
-				-f docker-compose.yml \
-				--env-file .env/dolibarr.env
+	-f docker-compose.yml \
+	--env-file .env/dolibarr.env
 
-# Here are default services allowed to start by default
+# Default services
 SERVICES ?= \
 	web db
+
+DB_DUMP ?=
+DB_PASSWORD ?=
+
+# Targets
+.PHONY: test
 
 test:
 	$(MAKE) --dry-run
@@ -32,11 +39,11 @@ stop:  ## Stop all or specific services
 	$(COMPOSE_CMD) stop ${SERVICES}
 
 .PHONY: start
-start:  ## Stop all or specific services
+start:  ## Start all or specific services
 	$(COMPOSE_CMD) start ${SERVICES}
 
 .PHONY: restart
-restart:  ## Stop all or specific services
+restart:  ## Restart all or specific services
 	$(COMPOSE_CMD) restart ${SERVICES}
 
 .PHONY: logs
@@ -44,12 +51,13 @@ logs:  ## Logs all or specific services
 	$(COMPOSE_CMD) logs -f ${SERVICES}
 
 .PHONY: update
-update: stop ## Update services
-	$(COMPOSE_CMD) pull ${SERVICES}
-	$(COMPOSE_CMD) start ${SERVICES}
+update:  ## Update services
+update: pull up ## Update services
 
-DB_DUMP ?= 
-DB_PASSWORD ?=
+.PHONY: pull
+pull:  ## Pull all images
+	$(COMPOSE_CMD) pull ${SERVICES}
+
 .PHONY: db/restore
-db/restore:  ## Restauring DB from SQL.GZ file
+db/restore:  ## Restore DB from SQL.GZ file
 	$(COMPOSE_CMD) exec -T db mariadb -uroot -p${DB_PASSWORD} dolibarr < ${DB_DUMP}
