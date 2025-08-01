@@ -17,6 +17,7 @@ volumes:
 services:
     db:
         image: mariadb:latest
+        restart: always
         env_file:
             - .env/mariadb.env
         volumes:
