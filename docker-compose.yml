@@ -5,11 +5,6 @@
 
 name: dolibarr
 
-networks:
-    frontend:
-    backend:
-
-
 volumes:
     db-data:
 
@@ -22,8 +17,6 @@ services:
             - .env/mariadb.env
         volumes:
             - db-data:/var/lib/mysql
-        networks:
-            - backend
 
     web:
         depends_on:
@@ -33,12 +26,9 @@ services:
             - .env/dolibarr.env
         restart: always
         ports:
-            - "${DOLI_PORT}:80"
+            - ${DOLI_PORT}:80
         links:
             - db
         volumes:
-            - "${DOLI_DATA_DOCUMENTS}:/var/www/documents"
-            - "${DOLI_DATA_CUSTOM}:/var/www/html/custom"
-        networks:
-            - frontend
-            - backend
+            - ${DOLI_DATA_DOCUMENTS}:/var/www/documents
+            - ${DOLI_DATA_CUSTOM}:/var/www/html/custom
