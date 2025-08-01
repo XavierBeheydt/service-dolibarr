@@ -1,4 +1,4 @@
-# 🐳 Docker - Dolibarr
+# Service - Dolibarr
 
 This repository helps to backup my services settings and how to use them. The service here is Dolibarr
 and it's my ERP CRM for my dev job.
