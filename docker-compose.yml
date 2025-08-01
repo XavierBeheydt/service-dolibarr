@@ -1,7 +1,7 @@
-# Copyright Xavier Beheydt. All rights reserved.
+# Copyright (c) Xavier Beheydt <xavier.beheydt@gmail.com>. All rights reserved.
 
-# Informations
-# https://docs.docker.com/compose/compose-file/
+# Informations :
+#   - https://docs.docker.com/compose/compose-file/
 
 name: dolibarr
 
