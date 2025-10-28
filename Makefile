@@ -11,7 +11,8 @@ else
 endif
 COMPOSE_CMD = docker compose \
 	-f docker-compose.yml \
-	--env-file .env/dolibarr.env
+	--env-file=./.env/dolibarr.env \
+	--env-file=./.env/mariadb.env
 
 # Default services
 SERVICES ?= \
