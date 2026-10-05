@@ -1,0 +1,115 @@
+# Copyright (c) 2026 Xavier Beheydt <xavier.beheydt@gmail.com>
+
+# Shared by the web and cron containers: same image, same configuration
+x-dolibarr: &dolibarr
+  image: dolibarr/dolibarr:${DOLIBARR_VERSION:-24}
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+
+x-dolibarr-env: &dolibarr-env
+  DOLI_URL_ROOT: "https://${DOLIBARR_HOST:?DOLIBARR_HOST is required}"
+  DOLI_DB_HOST: db
+  DOLI_DB_NAME: ${DB_NAME:-dolibarr}
+  DOLI_DB_USER: ${DB_USER:-dolibarr}
+  DOLI_DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+  # conf.php is generated from these variables each time a container is
+  # created, so the unique ID must never change once Dolibarr is installed
+  DOLI_INSTANCE_UNIQUE_ID: ${DOLI_INSTANCE_UNIQUE_ID:?DOLI_INSTANCE_UNIQUE_ID is required}
+  # Only used at the first start, to create the database and the first admin
+  DOLI_ADMIN_LOGIN: ${DOLI_ADMIN_LOGIN:-admin}
+  DOLI_ADMIN_PASSWORD: ${DOLI_ADMIN_PASSWORD:?DOLI_ADMIN_PASSWORD is required}
+  DOLI_COMPANY_NAME: ${DOLI_COMPANY_NAME:-}
+  DOLI_COMPANY_COUNTRYCODE: ${DOLI_COMPANY_COUNTRYCODE:-}
+  DOLI_ENABLE_MODULES: ${DOLI_ENABLE_MODULES:-}
+  DOLI_CRON_KEY: ${DOLI_CRON_KEY:?DOLI_CRON_KEY is required}
+  DOLI_CRON_USER: ${DOLI_ADMIN_LOGIN:-admin}
+  PHP_INI_DATE_TIMEZONE: ${TZ:-Europe/Paris}
+  PHP_INI_UPLOAD_MAX_FILESIZE: ${PHP_INI_UPLOAD_MAX_FILESIZE:-20M}
+  PHP_INI_POST_MAX_SIZE: ${PHP_INI_POST_MAX_SIZE:-22M}
+
+services:
+  db:
+    image: mariadb:${MARIADB_VERSION:-12.3}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-dolibarr}
+      MARIADB_USER: ${DB_USER:-dolibarr}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD is required}
+      # Upgrade the system tables when MARIADB_VERSION goes up
+      MARIADB_AUTO_UPGRADE: "1"
+      TZ: ${TZ:-Europe/Paris}
+    volumes:
+      - db:/var/lib/mysql
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 60s
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  web:
+    <<: *dolibarr
+    environment:
+      <<: *dolibarr-env
+    volumes:
+      - documents:/var/www/documents
+      - custom:/var/www/html/custom
+      # Real client IP from Traefik's X-Forwarded-For
+      - ./apache/remoteip.load:/etc/apache2/mods-enabled/remoteip.load:ro
+      - ./apache/remoteip.conf:/etc/apache2/mods-enabled/remoteip.conf:ro
+    networks:
+      - proxy
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/"]
+      # The first start creates the database, which takes a few minutes
+      start_period: 300s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dolibarr.rule=Host(`${DOLIBARR_HOST:?DOLIBARR_HOST is required}`)"
+      - "traefik.http.routers.dolibarr.entrypoints=websecure"
+      - "traefik.http.services.dolibarr.loadbalancer.server.port=80"
+
+  # Runs the jobs of the "Scheduled jobs" module every 5 minutes. It needs its
+  # own container: the image runs either Apache or cron, not both.
+  cron:
+    <<: *dolibarr
+    environment:
+      <<: *dolibarr-env
+      DOLI_CRON: "1"
+    volumes:
+      - documents:/var/www/documents
+      - custom:/var/www/html/custom
+    networks:
+      - default
+      - backend
+    depends_on:
+      web:
+        condition: service_healthy
+
+networks:
+  # Shared with Traefik, which owns it (services/traefik)
+  proxy:
+    external: true
+  # Database only: no Internet access, not reachable from Traefik
+  backend:
+    internal: true
+  # Outbound access for the cron jobs (emails, web services)
+  default:
+
+volumes:
+  db:
+  documents:
+  custom:

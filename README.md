@@ -1,116 +1,53 @@
-# Service - Dolibarr
+# service-dolibarr
 
-This repository contains Docker configuration for running Dolibarr, an open-source ERP and CRM system. Dolibarr is used here as the ERP CRM for development work.
+[Dolibarr](https://www.dolibarr.org) ERP & CRM, from the official [`dolibarr/dolibarr`](https://github.com/Dolibarr/dolibarr-docker) image, with MariaDB. Traefik ([`service-traefik`](https://github.com/XavierBeheydt/service-traefik)) serves it over HTTPS on its own host name. The defaults in `.env.example` are for **local testing**. The production values go in `.env` on the VPS.
 
-## 🏗️ Architecture
+## Stack
 
-The setup includes:
-- **Dolibarr Web Application**: Custom Docker image based on Dolibarr 21 with Apache configuration for serving under `/crm` path.
-- **MariaDB Database**: Persistent database storage.
-- **Traefik Integration**: Reverse proxy configuration with SSL termination.
+- `web`: Apache and Dolibarr. It sits on the external `proxy` network, and Traefik routes `DOLIBARR_HOST` to it. No port is published on the host.
+- `cron`: the same image with `DOLI_CRON=1`. It runs the jobs of the *Scheduled jobs* module every 5 minutes, because the image runs either Apache or cron, never both.
+- `db`: MariaDB, reachable only on the internal `backend` network, which has no Internet access.
+- Volumes: `db` (database), `documents` (uploaded files, generated PDFs, `install.lock`) and `custom` (external modules).
+- `apache/remoteip.*` makes Apache trust Traefik's `X-Forwarded-For`, so the logs and Dolibarr see the real client IP.
 
-## 📋 Prerequisites
+At the first start, the `web` container creates the database, the first admin account, the company and the modules from `.env`. This takes about a minute. Dolibarr's `conf.php` is not kept in a volume: the container generates it from the environment each time it is created.
 
-- Docker
-- Docker Compose
-- Make (for using the Makefile commands)
+## Recipes
 
-## 🚀 Installation
+Run `just` to list them. `up`, `down`, `start`, `stop` and `ps` are the common recipes every service provides, so the parent repo can drive all services the same way.
 
-1. Clone this repository:
-   ```bash
-   git clone <repository-url>
-   cd dolibarr
-   ```
+- `just env`: create `.env` from `.env.example` if it is missing
+- `just up`: create `.env`, then `docker compose up -d`. Traefik must be running, because it owns the `proxy` network. The command waits until Dolibarr is healthy.
+- `just down` / `just start` / `just stop` / `just ps` / `just logs`
+- `just clean`: after a confirmation, remove the containers, the `db`, `documents` and `custom` volumes, and `.env`. **On the VPS this deletes all the Dolibarr data.**
 
-2. Configure environment variables in `.env` file (see Configuration section).
+## Local testing
 
-3. Ensure the external network `private` exists (used by Traefik):
-   ```bash
-   docker network create private
-   ```
-
-## ⚙️ Configuration
-
-Environment variables are defined in the `.env` file:
-
-- `DOLI_TAG`: Dolibarr version tag (default: 21)
-- `DOLI_PORT`: Port for local access (default: 8083)
-- Database settings: `MYSQL_DATABASE`, `MYSQL_ROOT_PASSWORD`
-- Dolibarr settings: `DOLI_DB_*`, `DOLI_ADMIN_*`, etc.
-- Data directories: `DOLI_DATA_DOCUMENTS`, `DOLI_DATA_CUSTOM`
-
-**Important**: Update paths in `DOLI_DATA_DOCUMENTS` and `DOLI_DATA_CUSTOM` to match your system's data directories.
-
-## 🛠️ Usage
-
-This project uses Docker Compose with a Makefile for simplified commands.
-
-### Available Commands
+From the parent repo, start Traefik first:
 
 ```bash
-# Build and start services
-make up
-
-# Stop services
-make stop
-
-# Start stopped services
-make start
-
-# Restart services
-make restart
-
-# Stop and remove services
-make down
-
-# View logs
-make logs
-
-# Update services (pull latest images and restart)
-make update
-
-# Pull latest images
-make pull
+just up traefik dolibarr
+curl --cacert services/traefik/certs/ca.crt https://dolibarr.docker.localhost/
 ```
 
-### Database Management
+Open <https://dolibarr.docker.localhost> and log in as `admin` / `admin`.
+
+## Production
+
+The DNS record for `DOLIBARR_HOST` must point to the VPS, and Traefik must run with `TLS_CERT_RESOLVER=le`.
 
 ```bash
-# Restore database from SQL file
-make db/restore DB_DUMP=path/to/dump.sql DB_PASSWORD=your_password
+just env
+openssl rand -hex 32   # DOLI_INSTANCE_UNIQUE_ID
+openssl rand -hex 16   # DOLI_CRON_KEY
+openssl rand -hex 24   # DB_PASSWORD, DB_ROOT_PASSWORD, DOLI_ADMIN_PASSWORD
+nvim .env              # set DOLIBARR_HOST, the secrets above, DOLI_COMPANY_NAME and DOLI_ENABLE_MODULES
+just up
+just logs
 ```
 
-### Accessing Dolibarr
+Keep a copy of `.env` somewhere safe, outside the VPS:
 
-Once running, access Dolibarr at: `https://broska.hd.free.fr/crm`
-
-Default admin credentials:
-- Username: `root`
-- Password: `root`
-
-## 📁 Project Structure
-
-```
-dolibarr/
-├── docker-compose.yml    # Docker Compose configuration
-├── Dockerfile           # Custom Dolibarr image
-├── Makefile            # Build and management commands
-├── .env                # Environment variables
-├── apache-config/      # Apache configuration
-│   └── dolibarr-crm.conf
-├── README.md           # This file
-└── TODO.md             # Development tasks
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📄 License
-
-Copyright (c) Xavier Beheydt. All rights reserved.
+- `DOLI_INSTANCE_UNIQUE_ID` encrypts some of the data stored by Dolibarr, so it must never change once Dolibarr is installed. Losing it makes that data unreadable.
+- `DOLI_ADMIN_*`, `DOLI_COMPANY_*`, `DOLI_ENABLE_MODULES` and `DOLI_CRON_KEY` are only used at the first start, so editing them later has no effect. Change these settings in Dolibarr instead. Keep `Cron` in `DOLI_ENABLE_MODULES`, or the cron key is not stored and the scheduled jobs are rejected.
+- `DB_*` are only used to create the database. Changing a password afterwards also requires changing it in MariaDB.
