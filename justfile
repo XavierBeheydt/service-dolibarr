@@ -11,8 +11,22 @@ default:
 env:
     @test -f .env || { cp .env.example .env && echo "Created .env from .env.example"; }
 
-# Start the stack (creates .env); Traefik must be up, it owns the proxy network
-up: env
+# Generate the missing secrets in secrets/ with random values (existing ones are kept)
+secrets:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p secrets
+    chmod 700 secrets
+    for spec in db_password:24 db_root_password:24 doli_instance_unique_id:32 doli_admin_password:12 doli_cron_key:16; do
+        file=secrets/${spec%%:*}
+        [ -s "$file" ] && continue
+        # World-readable inside the folder: MariaDB reads its secrets as the mysql user
+        (umask 022; openssl rand -hex "${spec#*:}" | tr -d '\n' > "$file")
+        echo "Created $file"
+    done
+
+# Start the stack (creates .env and the secrets); Traefik must be up, it owns the proxy network
+up: env secrets
     @docker network inspect proxy >/dev/null 2>&1 || { echo "The proxy network is missing, start Traefik first" >&2; exit 1; }
     docker compose up -d
 
@@ -42,7 +56,7 @@ backup:
     set -euo pipefail
     mkdir -p backups
     stamp=$(date +%Y%m%d-%H%M%S)
-    docker compose exec -T db sh -c 'exec mariadb-dump -uroot -p"$MARIADB_ROOT_PASSWORD" --single-transaction --routines --triggers "$MARIADB_DATABASE"' \
+    docker compose exec -T db sh -c 'exec mariadb-dump -uroot -p"$(cat "$MARIADB_ROOT_PASSWORD_FILE")" --single-transaction --routines --triggers "$MARIADB_DATABASE"' \
         | gzip > "backups/db-$stamp.sql.gz"
     docker compose exec -T web tar -C /var/www/documents -czf - . > "backups/documents-$stamp.tar.gz"
     docker compose exec -T web tar -C /var/www/html/custom -czf - . > "backups/custom-$stamp.tar.gz"
@@ -57,9 +71,9 @@ restore stamp:
     [ -f "$db" ] || db=backups/db-{{ stamp }}.sql
     [ -f "$db" ] || { echo "No backups/db-{{ stamp }}.sql[.gz] found" >&2; exit 1; }
     echo "==> database from $db"
-    docker compose exec -T db sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS \`$MARIADB_DATABASE\`; CREATE DATABASE \`$MARIADB_DATABASE\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"'
+    docker compose exec -T db sh -c 'exec mariadb -uroot -p"$(cat "$MARIADB_ROOT_PASSWORD_FILE")" -e "DROP DATABASE IF EXISTS \`$MARIADB_DATABASE\`; CREATE DATABASE \`$MARIADB_DATABASE\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"'
     case "$db" in *.gz) gunzip -c "$db" ;; *) cat "$db" ;; esac \
-        | docker compose exec -T db sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE"'
+        | docker compose exec -T db sh -c 'exec mariadb -uroot -p"$(cat "$MARIADB_ROOT_PASSWORD_FILE")" "$MARIADB_DATABASE"'
     for dir in documents:/var/www/documents custom:/var/www/html/custom; do
         archive=backups/${dir%%:*}-{{ stamp }}.tar.gz
         [ -f "$archive" ] || { echo "==> no $archive, ${dir#*:} kept"; continue; }
@@ -77,8 +91,8 @@ upgrade: backup
     docker compose exec -T web rm -f /var/www/documents/install.lock
     docker compose up -d --force-recreate
 
-# Remove the containers, the volumes (database, documents, custom modules) and .env
-[confirm("Remove containers, database, documents and custom modules volumes, and .env? [y/N]")]
-clean: env
+# Remove the containers, the volumes (database, documents, custom modules), .env and secrets/
+[confirm("Remove containers, database, documents and custom modules volumes, .env and secrets/? [y/N]")]
+clean: env secrets
     docker compose down --volumes --remove-orphans
-    rm -f .env
+    rm -rf .env secrets

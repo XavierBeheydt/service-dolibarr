@@ -10,17 +10,32 @@
 - Volumes: `db` (database), `documents` (uploaded files, generated PDFs, `install.lock`) and `custom` (external modules).
 - `apache/remoteip.*` makes Apache trust Traefik's `X-Forwarded-For`, so the logs and Dolibarr see the real client IP.
 
-At the first start, the `web` container creates the database, the first admin account, the company and the modules from `.env`. This takes about a minute. Dolibarr's `conf.php` is not kept in a volume: the container generates it from the environment each time it is created.
+At the first start, the `web` container creates the database, the first admin account, the company and the modules from `.env`. This takes about a minute. Dolibarr's `conf.php` is not kept in a volume: the container generates it from the environment and the secrets each time it is created.
+
+## Secrets
+
+The passwords and keys are not in `.env`. They are Docker secrets: one file per value in `secrets/` (git-ignored), mounted read-only in `/run/secrets/` and passed to the images through their `*_FILE` variables. They do not show up in `docker inspect` or in the containers' environment.
+
+| File | Used by | Purpose |
+| --- | --- | --- |
+| `db_password` | db, web, cron | password of `DB_USER` |
+| `db_root_password` | db | MariaDB root password, used by `backup` and `restore` |
+| `doli_instance_unique_id` | web, cron | key Dolibarr encrypts some data with (e.g. stored passwords) |
+| `doli_admin_password` | web | password of the first admin account `DOLI_ADMIN_LOGIN` |
+| `doli_cron_key` | web, cron | key the cron container runs the scheduled jobs with |
+
+`just secrets` (run by `just up`) writes a random value into each missing file and keeps the existing ones. To set a value yourself, write it to the file before the first `just up`, without a trailing newline: `printf %s '<value>' > secrets/<name>`. The files are readable by everyone, since MariaDB reads its secrets as the `mysql` user. The `secrets/` folder itself is only accessible to its owner.
 
 ## Recipes
 
 Run `just` to list them. `up`, `down`, `start`, `stop` and `ps` are the common recipes every service provides, so the parent repo can drive all services the same way.
 
 - `just env`: create `.env` from `.env.example` if it is missing
-- `just up`: create `.env`, then `docker compose up -d`. Traefik must be running, because it owns the `proxy` network. The command waits until Dolibarr is healthy.
+- `just secrets`: generate the missing secrets in `secrets/`
+- `just up`: create `.env` and the secrets, then `docker compose up -d`. Traefik must be running, because it owns the `proxy` network. The command waits until Dolibarr is healthy.
 - `just down` / `just start` / `just stop` / `just ps` / `just logs`
 - `just backup` / `just restore <stamp>` / `just upgrade`: see the sections below
-- `just clean`: after a confirmation, remove the containers, the `db`, `documents` and `custom` volumes, and `.env`. **On the VPS this deletes all the Dolibarr data.**
+- `just clean`: after a confirmation, remove the containers, the `db`, `documents` and `custom` volumes, `.env` and `secrets/`. **On the VPS this deletes all the Dolibarr data.**
 
 ## Local testing
 
@@ -31,7 +46,7 @@ just up traefik dolibarr
 curl --cacert services/traefik/certs/ca.crt https://dolibarr.docker.localhost/
 ```
 
-Open <https://dolibarr.docker.localhost> and log in as `admin` / `admin`.
+Open <https://dolibarr.docker.localhost> and log in as `admin`, with the password from `cat services/dolibarr/secrets/doli_admin_password`.
 
 ## Production
 
@@ -39,19 +54,18 @@ The DNS record for `DOLIBARR_HOST` must point to the VPS, and Traefik must run w
 
 ```bash
 just env
-openssl rand -hex 32   # DOLI_INSTANCE_UNIQUE_ID
-openssl rand -hex 16   # DOLI_CRON_KEY
-openssl rand -hex 24   # DB_PASSWORD, DB_ROOT_PASSWORD, DOLI_ADMIN_PASSWORD
-nvim .env              # set DOLIBARR_HOST, the secrets above, DOLI_COMPANY_NAME and DOLI_ENABLE_MODULES
+nvim .env              # set DOLIBARR_HOST, DOLI_COMPANY_NAME and DOLI_ENABLE_MODULES
+just secrets           # random passwords and keys in secrets/
 just up
 just logs
+cat secrets/doli_admin_password
 ```
 
-Keep a copy of `.env` somewhere safe, outside the VPS:
+Keep a copy of `.env` and `secrets/` somewhere safe, outside the VPS:
 
-- `DOLI_INSTANCE_UNIQUE_ID` encrypts some of the data stored by Dolibarr, so it must never change once Dolibarr is installed. Losing it makes that data unreadable.
-- `DOLI_ADMIN_*`, `DOLI_COMPANY_*`, `DOLI_ENABLE_MODULES` and `DOLI_CRON_KEY` are only used at the first start, so editing them later has no effect. Change these settings in Dolibarr instead. Keep `Cron` in `DOLI_ENABLE_MODULES`, or the cron key is not stored and the scheduled jobs are rejected.
-- `DB_*` are only used to create the database. Changing a password afterwards also requires changing it in MariaDB.
+- `doli_instance_unique_id` must never change once Dolibarr is installed. Losing it makes the data Dolibarr encrypted unreadable, even when the database is restored from a backup.
+- `DOLI_ADMIN_LOGIN`, `doli_admin_password`, `DOLI_COMPANY_*`, `DOLI_ENABLE_MODULES` and `doli_cron_key` are only used at the first start, so editing them later has no effect. Change these settings in Dolibarr instead. Keep `Cron` in `DOLI_ENABLE_MODULES`, or the cron key is not stored and the scheduled jobs are rejected.
+- `DB_*`, `db_password` and `db_root_password` are only used to create the database. Changing a password afterwards also requires changing it in MariaDB.
 
 ## Backup and restore
 
@@ -60,7 +74,7 @@ just backup                    # writes backups/{db,documents,custom}-<stamp>.*
 just restore 20261005-142000   # asks for confirmation, then replaces the data with that backup
 ```
 
-`backup` dumps the database and archives the `documents` and `custom` volumes into `backups/`, which is git-ignored. `just clean` leaves this folder alone. Copy the backups off the VPS: they hold all the data. `restore` recreates the database from `db-<stamp>.sql.gz` (or a plain `.sql`), then replaces each volume whose archive is present. It finishes by recreating the containers. If the backup comes from an older Dolibarr version, the database is migrated at that point.
+`backup` dumps the database and archives the `documents` and `custom` volumes into `backups/`, which is git-ignored. `just clean` leaves this folder alone. Copy the backups off the VPS: they hold all the data. They do not include `secrets/`, so keep `doli_instance_unique_id` with them. `restore` recreates the database from `db-<stamp>.sql.gz` (or a plain `.sql`), then replaces each volume whose archive is present. It finishes by recreating the containers. If the backup comes from an older Dolibarr version, the database is migrated at that point.
 
 ## Upgrade
 
@@ -81,7 +95,7 @@ tar -C <DOLI_DATA_CUSTOM> -czf custom-old.tar.gz .
 docker exec <web container> grep instance_unique_id /var/www/html/conf/conf.php
 ```
 
-Dump only the Dolibarr database, without `--databases`, so the import goes into `DB_NAME`. On the VPS, put the three files in `backups/`. Set `DOLI_INSTANCE_UNIQUE_ID` in `.env` to the old value, so Dolibarr can still read the data it encrypted.
+Dump only the Dolibarr database, without `--databases`, so the import goes into `DB_NAME`. On the VPS, put the three files in `backups/`. Before the first `just up`, write the old instance ID to the secret (`printf %s '<old value>' > secrets/doli_instance_unique_id`), so Dolibarr can still read the data it encrypted.
 
 The image migrates the database by only one major version at a time. Start from the version right after the old one, then step up:
 
@@ -93,4 +107,4 @@ nvim .env            # DOLIBARR_VERSION=23
 just upgrade         # migrates 22 → 23, and so on up to the target version
 ```
 
-The restored database brings back the old users, so `DOLI_ADMIN_*` no longer applies. Links to the old `/crm/...` URLs have to be updated to `https://<DOLIBARR_HOST>/...`.
+The restored database brings back the old users and the old cron key, so `DOLI_ADMIN_LOGIN`, `doli_admin_password` and `doli_cron_key` no longer apply. Copy the old cron key (*Setup > Modules > Scheduled jobs*) into `secrets/doli_cron_key`, then run `just up` to recreate the cron container. Links to the old `/crm/...` URLs have to be updated to `https://<DOLIBARR_HOST>/...`.
