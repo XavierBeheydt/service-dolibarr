@@ -54,6 +54,17 @@ ps:
 logs:
     docker compose logs -f
 
+# Dump the database and archive the documents into backups/ (the stack must be running)
+backup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p backups
+    stamp=$(date +%Y%m%d-%H%M%S)
+    docker compose exec -T db sh -c 'exec mariadb-dump -u"$(cat "$MARIADB_USER_FILE")" -p"$(cat "$MARIADB_PASSWORD_FILE")" --single-transaction --routines --triggers "$MARIADB_DATABASE"' \
+        | gzip > "backups/db-$stamp.sql.gz"
+    docker compose exec -T web tar -C /var/www/documents -czf - . > "backups/documents-$stamp.tar.gz"
+    echo "Backup written to backups/{db,documents}-$stamp.*"
+
 # Remove the containers, the volumes (database, documents), .env and secrets/ (backups/ is kept)
 [confirm("Remove containers, database and documents volumes, .env and secrets/? [y/N]")]
 clean: env secrets

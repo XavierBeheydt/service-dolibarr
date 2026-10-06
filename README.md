@@ -16,6 +16,7 @@ Run `just` to list them. `up`, `down`, `start`, `stop` and `ps` are the common r
 - `just secrets`: generate the missing files of `secrets/` with random values (existing ones are kept)
 - `just up`: create `.env` and the secrets, then `docker compose up -d`. Traefik must be up first, it owns the `proxy` network.
 - `just down` / `just start` / `just stop` / `just ps` / `just logs`
+- `just backup`: dump the database and archive the documents into `backups/` (see below)
 - `just clean`: after a confirmation, remove the containers, the `db` and `documents` volumes, `.env` and `secrets/`. `backups/` is kept.
 
 ## Local testing
@@ -28,6 +29,14 @@ cat services/dolibarr/secrets/doli_admin_password
 Open https://dolibarr.docker.localhost and log in as `admin` with that password. `*.docker.localhost` resolves to `127.0.0.1` without any DNS setup, and the certificate comes from `just certs` in `services/traefik` (import its `certs/ca.crt` in your browser, or use `curl --cacert`).
 
 The first start installs Dolibarr, which takes a few minutes: `just logs` shows the progress and `just ps` shows `healthy` once the web container is ready.
+
+## Backup
+
+```bash
+just backup
+```
+
+Writes `backups/db-<stamp>.sql.gz` (the database, dumped with the application user) and `backups/documents-<stamp>.tar.gz` (the documents) next to the justfile. The stack must be running. `backups/` is git-ignored and survives `just clean`. There is no restore recipe: a new machine starts from a fresh instance.
 
 ## Production
 
