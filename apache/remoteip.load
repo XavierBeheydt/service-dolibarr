@@ -1,3 +1,0 @@
-# Copyright (c) 2026 Xavier Beheydt <xavier.beheydt@gmail.com>
-
-LoadModule remoteip_module /usr/lib/apache2/modules/mod_remoteip.so
