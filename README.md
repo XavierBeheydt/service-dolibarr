@@ -1,116 +1,52 @@
-# Service - Dolibarr
+# service-dolibarr
 
-This repository contains Docker configuration for running Dolibarr, an open-source ERP and CRM system. Dolibarr is used here as the ERP CRM for development work.
+[Dolibarr](https://www.dolibarr.org/) ERP/CRM, from the official `dolibarr/dolibarr` image, with MariaDB, served through Traefik on `dolibarr.<DOMAIN>`.
 
-## 🏗️ Architecture
+- **Image**: `dolibarr/dolibarr`, pinned to a major version by `DOLIBARR_VERSION` (24 by default). No custom image, no path prefix.
+- **Database**: MariaDB LTS (`MARIADB_VERSION=lts`) in the `db` volume.
+- **Networks**: `web` joins the external `proxy` network (owned by `services/traefik`) and the `private` one, shared with `db` only. `db` is never reachable from Traefik and publishes no port.
+- **Secrets**: the database user, the database and root passwords, the instance unique ID and the admin password are Docker secrets, one file each in `secrets/` (git-ignored), read through the images' `*_FILE` variables. No secret value appears in `docker inspect`.
+- **Not included yet**: the cron container for the scheduled jobs and the real client IP behind Traefik.
 
-The setup includes:
-- **Dolibarr Web Application**: Custom Docker image based on Dolibarr 21 with Apache configuration for serving under `/crm` path.
-- **MariaDB Database**: Persistent database storage.
-- **Traefik Integration**: Reverse proxy configuration with SSL termination.
+## Recipes
 
-## 📋 Prerequisites
+Run `just` to list them. `up`, `down`, `start`, `stop` and `ps` are the common recipes every service provides, so the parent repo can drive all services the same way.
 
-- Docker
-- Docker Compose
-- Make (for using the Makefile commands)
+- `just env`: create `.env` from `.env.example` if it is missing
+- `just secrets`: generate the missing files of `secrets/` with random values (existing ones are kept)
+- `just up`: create `.env` and the secrets, then `docker compose up -d`. Traefik must be up first, it owns the `proxy` network.
+- `just down` / `just start` / `just stop` / `just ps` / `just logs`
+- `just backup`: dump the database and archive the documents into `backups/` (see below)
+- `just clean`: after a confirmation, remove the containers, the `db` and `documents` volumes, `.env` and `secrets/`. `backups/` is kept.
 
-## 🚀 Installation
-
-1. Clone this repository:
-   ```bash
-   git clone <repository-url>
-   cd dolibarr
-   ```
-
-2. Configure environment variables in `.env` file (see Configuration section).
-
-3. Ensure the external network `private` exists (used by Traefik):
-   ```bash
-   docker network create private
-   ```
-
-## ⚙️ Configuration
-
-Environment variables are defined in the `.env` file:
-
-- `DOLI_TAG`: Dolibarr version tag (default: 21)
-- `DOLI_PORT`: Port for local access (default: 8083)
-- Database settings: `MYSQL_DATABASE`, `MYSQL_ROOT_PASSWORD`
-- Dolibarr settings: `DOLI_DB_*`, `DOLI_ADMIN_*`, etc.
-- Data directories: `DOLI_DATA_DOCUMENTS`, `DOLI_DATA_CUSTOM`
-
-**Important**: Update paths in `DOLI_DATA_DOCUMENTS` and `DOLI_DATA_CUSTOM` to match your system's data directories.
-
-## 🛠️ Usage
-
-This project uses Docker Compose with a Makefile for simplified commands.
-
-### Available Commands
+## Local testing
 
 ```bash
-# Build and start services
-make up
-
-# Stop services
-make stop
-
-# Start stopped services
-make start
-
-# Restart services
-make restart
-
-# Stop and remove services
-make down
-
-# View logs
-make logs
-
-# Update services (pull latest images and restart)
-make update
-
-# Pull latest images
-make pull
+just up traefik dolibarr          # from the parent repo
+cat services/dolibarr/secrets/doli_admin_password
 ```
 
-### Database Management
+Open https://dolibarr.docker.localhost and log in as `admin` with that password. `*.docker.localhost` resolves to `127.0.0.1` without any DNS setup, and the certificate comes from `just certs` in `services/traefik` (import its `certs/ca.crt` in your browser, or use `curl --cacert`).
+
+The first start installs Dolibarr, which takes a few minutes: `just logs` shows the progress and `just ps` shows `healthy` once the web container is ready.
+
+## Backup
 
 ```bash
-# Restore database from SQL file
-make db/restore DB_DUMP=path/to/dump.sql DB_PASSWORD=your_password
+just backup
 ```
 
-### Accessing Dolibarr
+Writes `backups/db-<stamp>.sql.gz` (the database, dumped with the application user) and `backups/documents-<stamp>.tar.gz` (the documents) next to the justfile. The stack must be running. `backups/` is git-ignored and survives `just clean`. There is no restore recipe: a new machine starts from a fresh instance.
 
-Once running, access Dolibarr at: `https://broska.hd.free.fr/crm`
+## Production
 
-Default admin credentials:
-- Username: `root`
-- Password: `root`
+The DNS record for `dolibarr.<DOMAIN>` must point to the VPS, and `services/traefik` must run with `TLS_CERT_RESOLVER=le`.
 
-## 📁 Project Structure
-
-```
-dolibarr/
-├── docker-compose.yml    # Docker Compose configuration
-├── Dockerfile           # Custom Dolibarr image
-├── Makefile            # Build and management commands
-├── .env                # Environment variables
-├── apache-config/      # Apache configuration
-│   └── dolibarr-crm.conf
-├── README.md           # This file
-└── TODO.md             # Development tasks
+```bash
+just env
+nvim .env       # set DOMAIN, the same as services/traefik
+just up
+cat secrets/doli_admin_password
 ```
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📄 License
-
-Copyright (c) Xavier Beheydt. All rights reserved.
+Keep `secrets/doli_instance_unique_id` and the database secrets: Dolibarr and MariaDB only read them at the first start, and the instance ID must not change once Dolibarr is installed.
