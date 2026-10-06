@@ -4,9 +4,18 @@
 
 ## Stack
 
-- `web`: Apache and Dolibarr. It sits on the external `proxy` network, and Traefik routes `DOLIBARR_HOST` to it. No port is published on the host.
-- `cron`: the same image with `DOLI_CRON=1`. It runs the jobs of the *Scheduled jobs* module every 5 minutes, because the image runs either Apache or cron, never both.
-- `db`: MariaDB, reachable only on the internal `backend` network, which has no Internet access.
+- `web`: Apache and Dolibarr. Traefik routes `DOLIBARR_HOST` to it over the shared `proxy` network. No port is published on the host.
+- `cron`: the same image with `DOLI_CRON=1`. It runs the jobs of the *Scheduled jobs* module every 5 minutes, because the image runs either Apache or cron, never both. Most jobs need to reach out: emails (SMTP, since the image has no local `sendmail`), mailbox collection (IMAP) and exchange rates (HTTPS).
+- `db`: MariaDB.
+- Networks:
+
+  | Network | Internet | `db` | `web` | `cron` |
+  | --- | --- | --- | --- | --- |
+  | `internal` (this stack only) | no | ✓ | ✓ | ✓ |
+  | `proxy` (shared with Traefik) | no | | ✓ | |
+  | `egress` (this stack only) | yes | | ✓ | ✓ |
+
+  The database is only reachable from `web` and `cron`, and cannot reach the Internet.
 - Volumes: `db` (database), `documents` (uploaded files, generated PDFs, `install.lock`) and `custom` (external modules).
 - `apache/remoteip.*` makes Apache trust Traefik's `X-Forwarded-For`, so the logs and Dolibarr see the real client IP.
 
@@ -32,7 +41,8 @@ Run `just` to list them. `up`, `down`, `start`, `stop` and `ps` are the common r
 
 - `just env`: create `.env` from `.env.example` if it is missing
 - `just secrets`: generate the missing secrets in `secrets/`
-- `just up`: create `.env` and the secrets, then `docker compose up -d`. Traefik must be running, because it owns the `proxy` network. The command waits until Dolibarr is healthy.
+- `just networks`: create the shared `proxy` network (internal) if it is missing. It fails if `proxy` exists but is not internal: see the Traefik README.
+- `just up`: create `.env`, the secrets and the `proxy` network, then `docker compose up -d`. The command waits until Dolibarr is healthy. Dolibarr is only reachable once Traefik is running.
 - `just down` / `just start` / `just stop` / `just ps` / `just logs`
 - `just backup` / `just restore <stamp>` / `just upgrade`: see the sections below
 - `just clean`: after a confirmation, remove the containers, the `db`, `documents` and `custom` volumes, `.env` and `secrets/`. **On the VPS this deletes all the Dolibarr data.**

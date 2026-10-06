@@ -25,9 +25,20 @@ secrets:
         echo "Created $file"
     done
 
-# Start the stack (creates .env and the secrets); Traefik must be up, it owns the proxy network
-up: env secrets
-    @docker network inspect proxy >/dev/null 2>&1 || { echo "The proxy network is missing, start Traefik first" >&2; exit 1; }
+# Create the shared internal proxy network if it is missing
+networks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! internal=$(docker network inspect -f '{{{{.Internal}}' proxy 2>/dev/null); then
+        docker network create --internal proxy >/dev/null
+        echo "Created the internal proxy network"
+    elif [ "$internal" != true ]; then
+        echo "The proxy network is not internal: stop every stack, run \`docker network rm proxy\`, then start them again" >&2
+        exit 1
+    fi
+
+# Start the stack (creates .env, the secrets and the proxy network)
+up: env secrets networks
     docker compose up -d
 
 # Stop and remove the containers (the volumes are kept)
