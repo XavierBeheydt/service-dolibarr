@@ -8,7 +8,6 @@
 - `cron`: the same image with `DOLI_CRON=1`. It runs the jobs of the *Scheduled jobs* module every 5 minutes, because the image runs either Apache or cron, never both.
 - `db`: MariaDB, reachable only on the internal `backend` network, which has no Internet access.
 - Volumes: `db` (database), `documents` (uploaded files, generated PDFs, `install.lock`) and `custom` (external modules).
-- `apache/remoteip.*` makes Apache trust Traefik's `X-Forwarded-For`, so the logs and Dolibarr see the real client IP.
 
 At the first start, the `web` container creates the database, the first admin account, the company and the modules from `.env`. This takes about a minute. Dolibarr's `conf.php` is not kept in a volume: the container generates it from the environment and the secrets each time it is created.
 
