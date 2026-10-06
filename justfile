@@ -25,19 +25,19 @@ secrets:
         echo "Created $file"
     done
 
-# Create the shared internal proxy network if it is missing
+# Create the shared internal ingress network if it is missing
 networks:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! internal=$(docker network inspect -f '{{{{.Internal}}' proxy 2>/dev/null); then
-        docker network create --internal proxy >/dev/null
-        echo "Created the internal proxy network"
+    if ! internal=$(docker network inspect -f '{{{{.Internal}}' ingress 2>/dev/null); then
+        docker network create --internal ingress >/dev/null
+        echo "Created the internal ingress network"
     elif [ "$internal" != true ]; then
-        echo "The proxy network is not internal: stop every stack, run \`docker network rm proxy\`, then start them again" >&2
+        echo "The ingress network is not internal: stop every stack, run \`docker network rm ingress\`, then start them again" >&2
         exit 1
     fi
 
-# Start the stack (creates .env, the secrets and the proxy network)
+# Start the stack (creates .env, the secrets and the ingress network)
 up: env secrets networks
     docker compose up -d
 

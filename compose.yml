@@ -73,7 +73,7 @@ services:
       - ./apache/remoteip.conf:/etc/apache2/mods-enabled/remoteip.conf:ro
     networks:
       - internal
-      - proxy
+      - ingress
       - egress
     depends_on:
       db:
@@ -110,7 +110,7 @@ services:
 
 networks:
   # Shared and internal: Traefik routing only, created by `just up`
-  proxy:
+  ingress:
     external: true
   # Between the containers of this stack: no Internet access
   internal:
