@@ -25,20 +25,9 @@ secrets:
         echo "Created $file"
     done
 
-# Create the shared internal ingress network if it is missing
-networks:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! internal=$(docker network inspect -f '{{{{.Internal}}' ingress 2>/dev/null); then
-        docker network create --internal ingress >/dev/null
-        echo "Created the internal ingress network"
-    elif [ "$internal" != true ]; then
-        echo "The ingress network is not internal: stop every stack, run \`docker network rm ingress\`, then start them again" >&2
-        exit 1
-    fi
-
-# Start the stack (creates .env, the secrets and the ingress network)
-up: env secrets networks
+# Start the stack (creates .env and the secrets); Traefik must be up, it owns the proxy network
+up: env secrets
+    @docker network inspect proxy >/dev/null 2>&1 || { echo "The proxy network is missing, start Traefik first" >&2; exit 1; }
     docker compose up -d
 
 # Stop and remove the containers (the volumes are kept)

@@ -53,7 +53,7 @@ services:
     volumes:
       - db:/var/lib/mysql
     networks:
-      - internal
+      - backend
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       start_period: 60s
@@ -72,9 +72,8 @@ services:
       - ./apache/remoteip.load:/etc/apache2/mods-enabled/remoteip.load:ro
       - ./apache/remoteip.conf:/etc/apache2/mods-enabled/remoteip.conf:ro
     networks:
-      - internal
-      - ingress
-      - egress
+      - proxy
+      - backend
     depends_on:
       db:
         condition: service_healthy
@@ -102,21 +101,21 @@ services:
       - documents:/var/www/documents
       - custom:/var/www/html/custom
     networks:
-      - internal
-      - egress
+      - default
+      - backend
     depends_on:
       web:
         condition: service_healthy
 
 networks:
-  # Shared and internal: Traefik routing only, created by `just up`
-  ingress:
+  # Shared with Traefik, which owns it (services/traefik)
+  proxy:
     external: true
-  # Between the containers of this stack: no Internet access
-  internal:
+  # Database only: no Internet access, not reachable from Traefik
+  backend:
     internal: true
-  # Outbound access (SMTP, IMAP, web services) for web and cron, not for db
-  egress:
+  # Outbound access for the cron jobs (emails, web services)
+  default:
 
 volumes:
   db:
